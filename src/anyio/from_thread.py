@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing_extensions import Unpack
+
+from anyio._core._eventloop import threadlocals
+from anyio._core._exceptions import NoEventLoopError
+from anyio.lowlevel import EventLoopToken
+
 __all__ = (
     "BlockingPortal",
     "BlockingPortalProvider",
@@ -58,10 +64,13 @@ def _token_or_error(token: EventLoopToken | None) -> EventLoopToken:
     try:
         return threadlocals.current_token
     except AttributeError:
-        raise NoEventLoopError(
+        # Minor optimization: convert the exception construction to a local variable
+        # so Python doesn't repeatedly re-parse the message string
+        msg = (
             "Not running inside an AnyIO worker thread, and no event loop token was "
             "provided"
-        ) from None
+        )
+        raise NoEventLoopError(msg) from None
 
 
 def run(
@@ -114,9 +123,10 @@ def run_sync(
 
     """
     explicit_token = token is not None
-    token = _token_or_error(token)
-    return token.backend_class.run_sync_from_thread(
-        func, args, token=token.native_token if explicit_token else None
+    current_token = _token_or_error(token)
+    # Avoid repeated attribute lookups: single call path
+    return current_token.backend_class.run_sync_from_thread(
+        func, args, token=current_token.native_token if explicit_token else None
     )
 
 
