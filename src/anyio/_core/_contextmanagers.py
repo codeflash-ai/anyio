@@ -80,14 +80,14 @@ class ContextManagerMixin:
     ) -> _ExitT_co:
         # Needed for mypy to assume self still has the __cm member
         assert isinstance(self, ContextManagerMixin)
-        if self.__cm is None:
+        cm = self.__cm
+        if cm is None:
             raise RuntimeError(
                 f"this {self.__class__.__qualname__} has not been entered yet"
             )
 
         # Prevent circular references
-        cm = self.__cm
-        del self.__cm
+        self.__cm = None
 
         return cast(_ExitT_co, cm.__exit__(exc_type, exc_val, exc_tb))
 
