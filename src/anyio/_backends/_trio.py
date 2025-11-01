@@ -37,6 +37,7 @@ from typing import (
     overload,
 )
 
+import trio
 import trio.from_thread
 import trio.lowlevel
 from outcome import Error, Outcome, Value
@@ -653,7 +654,7 @@ class Event(BaseEvent):
 
     def statistics(self) -> EventStatistics:
         orig_statistics = self.__original.statistics()
-        return EventStatistics(tasks_waiting=orig_statistics.tasks_waiting)
+        return EventStatistics(orig_statistics.tasks_waiting)
 
     def set(self) -> None:
         self.__original.set()
