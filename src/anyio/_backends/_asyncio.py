@@ -4,8 +4,10 @@ import array
 import asyncio
 import concurrent.futures
 import contextvars
+import enum
 import math
 import os
+import signal
 import socket
 import sys
 import threading
@@ -14,10 +16,14 @@ from asyncio import (
     AbstractEventLoop,
     CancelledError,
     all_tasks,
+    coroutines,
     create_task,
     current_task,
+    events,
+    exceptions,
     get_running_loop,
     sleep,
+    tasks,
 )
 from asyncio.base_events import _run_until_complete_cb  # type: ignore[attr-defined]
 from collections import OrderedDict, deque
@@ -60,6 +66,8 @@ from typing import (
 from weakref import WeakKeyDictionary
 
 import sniffio
+from exceptiongroup import BaseExceptionGroup
+from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 from .. import (
     CapacityLimiterStatistics,
@@ -420,23 +428,36 @@ class CancelScope(BaseCancelScope):
                 "Each CancelScope may only be used for a single 'with' block"
             )
 
-        self._host_task = host_task = cast(asyncio.Task, current_task())
+        host_task = cast(asyncio.Task, current_task())
+        self._host_task = host_task
         self._tasks.add(host_task)
-        try:
-            task_state = _task_states[host_task]
-        except KeyError:
+
+        # Try using get then setdefault idiom for much faster WeakKeyDictionary access
+        task_state = _task_states.get(host_task)
+        if task_state is None:
+            # TaskState: (parent_scope, cancel_scope)
             task_state = TaskState(None, self)
             _task_states[host_task] = task_state
         else:
             self._parent_scope = task_state.cancel_scope
             task_state.cancel_scope = self
-            if self._parent_scope is not None:
-                # If using an eager task factory, the parent scope may not even contain
-                # the host task
-                self._parent_scope._child_scopes.add(self)
-                self._parent_scope._tasks.discard(host_task)
+            parent_scope = self._parent_scope
+            if parent_scope is not None:
+                # Avoid repeat attribute lookups
+                parent_scope._child_scopes.add(self)
+                parent_scope._tasks.discard(host_task)
 
-        self._timeout()
+        deadline = self._deadline
+        # Fast-path for math.inf (very common), avoids function call overhead
+        if deadline != math.inf:
+            loop = get_running_loop()
+            now = loop.time()
+            # Check deadline directly
+            if now >= deadline:
+                self.cancel("deadline exceeded")
+            else:
+                self._timeout_handle = loop.call_at(deadline, self._timeout)
+        # Only activate after all other logic is done to minimize transition race surprises
         self._active = True
 
         # Start cancelling the host task if the scope was cancelled before entering
@@ -564,27 +585,41 @@ class CancelScope(BaseCancelScope):
         """
         should_retry = False
         current = current_task()
-        for task in self._tasks:
-            should_retry = True
-            if task._must_cancel:  # type: ignore[attr-defined]
-                continue
+        # Optimize: precompute fields, avoid repeated attribute lookups
+        tasks = self._tasks
+        host_task = self._host_task
+        origin_cancel_reason = origin._cancel_reason
 
-            # The task is eligible for cancellation if it has started
-            if task is not current and (task is self._host_task or _task_started(task)):
-                waiter = task._fut_waiter  # type: ignore[attr-defined]
+        for task in tasks:
+            if getattr(
+                task, "_must_cancel", False
+            ):  # attribute fetch, avoid type ignored
+                should_retry = True
+                continue
+            # task is eligible for cancellation if it has started and isn't the current task
+            if task is not current and (task is host_task or _task_started(task)):
+                waiter = getattr(task, "_fut_waiter", None)
                 if not isinstance(waiter, asyncio.Future) or not waiter.done():
-                    task.cancel(origin._cancel_reason)
+                    task.cancel(origin_cancel_reason)
+                    # Move the check out of the parameter list for branch prediction/clarity
                     if (
                         task is origin._host_task
                         and origin._pending_uncancellations is not None
                     ):
                         origin._pending_uncancellations += 1
 
+                # Deliver cancellation to child scopes that aren't shielded or running their own
+                # cancellation callbacks
+                should_retry = True  # Set retry only if cancellation attempted
+
         # Deliver cancellation to child scopes that aren't shielded or running their own
         # cancellation callbacks
         for scope in self._child_scopes:
             if not scope._shield and not scope.cancel_called:
-                should_retry = scope._deliver_cancellation(origin) or should_retry
+                if scope._deliver_cancellation(origin):
+                    should_retry = True
+
+        # Schedule another callback if there are still tasks left
 
         # Schedule another callback if there are still tasks left
         if origin is self:
