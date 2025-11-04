@@ -1874,8 +1874,9 @@ class Lock(BaseLock):
         self._owner_task = None
 
     def statistics(self) -> LockStatistics:
-        task_info = AsyncIOTaskInfo(self._owner_task) if self._owner_task else None
-        return LockStatistics(self.locked(), task_info, len(self._waiters))
+        owner_task = self._owner_task
+        task_info = AsyncIOTaskInfo(owner_task) if owner_task else None
+        return LockStatistics(owner_task is not None, task_info, len(self._waiters))
 
 
 class Semaphore(BaseSemaphore):
