@@ -375,19 +375,27 @@ def is_anyio_cancellation(exc: CancelledError) -> bool:
     # Sometimes third party frameworks catch a CancelledError and raise a new one, so as
     # a workaround we have to look at the previous ones in __context__ too for a
     # matching cancel message
+    # Sometimes third party frameworks catch a CancelledError and raise a new one, so as
+    # a workaround we have to look at the previous ones in __context__ too for a
+    # matching cancel message
+
+    args0_type = str  # Local reference for repeated isinstance checks, minor speedup
+
     while True:
-        if (
-            exc.args
-            and isinstance(exc.args[0], str)
-            and exc.args[0].startswith("Cancelled via cancel scope ")
-        ):
-            return True
+        args = exc.args
+        if args:
+            first_arg = args[0]
+            # Avoids repeated attribute access
+            if isinstance(first_arg, args0_type) and first_arg.startswith(
+                "Cancelled via cancel scope "
+            ):
+                return True
 
-        if isinstance(exc.__context__, CancelledError):
-            exc = exc.__context__
-            continue
-
-        return False
+        context = exc.__context__
+        # Avoid repeated isinstance and attribute access
+        if not isinstance(context, CancelledError):
+            return False
+        exc = context
 
 
 class CancelScope(BaseCancelScope):
