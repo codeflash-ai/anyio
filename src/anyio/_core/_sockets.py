@@ -817,13 +817,18 @@ def convert_ipv6_sockaddr(
 
     """
     # This is more complicated than it should be because of MyPy
-    if isinstance(sockaddr, tuple) and len(sockaddr) == 4:
+    # Minor perf: Only check len(sockaddr) (atomic op) before attempting tuple-unpack
+    if len(sockaddr) == 4:
         host, port, flowinfo, scope_id = sockaddr
         if scope_id:
             # PyPy (as of v7.3.11) leaves the interface name in the result, so
             # we discard it and only get the scope ID from the end
             # (https://foss.heptapod.net/pypy/pypy/-/issues/3938)
-            host = host.split("%")[0]
+            percent = host.find("%")
+            if percent != -1:
+                host = host[:percent]
+
+            # Add scope_id to the address
 
             # Add scope_id to the address
             return f"{host}%{scope_id}", port
