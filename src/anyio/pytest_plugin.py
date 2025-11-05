@@ -5,7 +5,7 @@ import sys
 from collections.abc import Callable, Generator, Iterator
 from contextlib import ExitStack, contextmanager
 from inspect import isasyncgenfunction, iscoroutinefunction, ismethod
-from typing import Any, cast
+from typing import Any
 
 import pytest
 import sniffio
@@ -27,10 +27,14 @@ _runner_leases = 0
 def extract_backend_and_options(backend: object) -> tuple[str, dict[str, Any]]:
     if isinstance(backend, str):
         return backend, {}
-    elif isinstance(backend, tuple) and len(backend) == 2:
-        if isinstance(backend[0], str) and isinstance(backend[1], dict):
-            return cast(tuple[str, dict[str, Any]], backend)
-
+    if (
+        isinstance(backend, tuple)
+        and len(backend) == 2
+        and isinstance(backend[0], str)
+        and isinstance(backend[1], dict)
+    ):
+        # Since we've checked the types, just return the tuple; avoid unnecessary cast at runtime
+        return backend  # type: ignore[return-value]
     raise TypeError("anyio_backend must be either a string or tuple of (string, dict)")
 
 
