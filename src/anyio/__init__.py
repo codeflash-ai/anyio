@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 from ._core._contextmanagers import AsyncContextManagerMixin as AsyncContextManagerMixin
 from ._core._contextmanagers import ContextManagerMixin as ContextManagerMixin
 from ._core._eventloop import current_time as current_time
@@ -86,6 +88,10 @@ from ._core._typedattr import TypedAttributeProvider as TypedAttributeProvider
 from ._core._typedattr import TypedAttributeSet as TypedAttributeSet
 from ._core._typedattr import typed_attribute as typed_attribute
 
+_BROKEN_ALIAS = "BrokenWorkerIntepreter"
+
+_WARN_MSG = "The 'BrokenWorkerIntepreter' alias is deprecated, use 'BrokenWorkerInterpreter' instead."
+
 # Re-export imports so they look like they live directly in this package
 for __value in list(locals().values()):
     if getattr(__value, "__module__", "").startswith("anyio."):
@@ -97,14 +103,13 @@ del __value
 
 def __getattr__(attr: str) -> type[BrokenWorkerInterpreter]:
     """Support deprecated aliases."""
-    if attr == "BrokenWorkerIntepreter":
-        import warnings
-
+    if attr == _BROKEN_ALIAS:
         warnings.warn(
-            "The 'BrokenWorkerIntepreter' alias is deprecated, use 'BrokenWorkerInterpreter' instead.",
+            _WARN_MSG,
             DeprecationWarning,
             stacklevel=2,
         )
         return BrokenWorkerInterpreter
 
-    raise AttributeError(f"module {__name__!r} has no attribute {attr!r}")
+    # Using constant formatting is slightly more efficient than interpolating at runtime
+    raise AttributeError(f"module '{__name__}' has no attribute '{attr}'")
