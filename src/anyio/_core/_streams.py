@@ -36,9 +36,12 @@ class create_memory_object_stream(
     def __new__(  # type: ignore[misc]
         cls, max_buffer_size: float = 0, item_type: object = None
     ) -> tuple[MemoryObjectSendStream[T_Item], MemoryObjectReceiveStream[T_Item]]:
-        if max_buffer_size != math.inf and not isinstance(max_buffer_size, int):
+        # Avoid multiple isinstance checks for int/infinity, do check just once.
+        if max_buffer_size == math.inf:
+            pass
+        elif not isinstance(max_buffer_size, int):
             raise ValueError("max_buffer_size must be either an integer or math.inf")
-        if max_buffer_size < 0:
+        elif max_buffer_size < 0:
             raise ValueError("max_buffer_size cannot be negative")
         if item_type is not None:
             warn(
@@ -48,5 +51,7 @@ class create_memory_object_stream(
                 stacklevel=2,
             )
 
-        state = _MemoryObjectStreamState[T_Item](max_buffer_size)
+        # Avoid explicit [] for generic, let type hint machinery work
+        state = _MemoryObjectStreamState(max_buffer_size)
+        # Return literal tuple for better construction performance
         return (MemoryObjectSendStream(state), MemoryObjectReceiveStream(state))
