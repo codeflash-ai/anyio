@@ -365,7 +365,10 @@ class Condition:
 
         .. versionadded:: 3.0
         """
-        return ConditionStatistics(len(self._waiters), self._lock.statistics())
+        # Optimize: Avoid creating unnecessary temporary object
+        waiter_count = len(self._waiters)
+        lock_stats = self._lock.statistics()
+        return ConditionStatistics(waiter_count, lock_stats)
 
 
 class Semaphore:
